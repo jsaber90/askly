@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
@@ -164,6 +165,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = ChatUiState(messages = chat.messages, chats = sessions, activeChatId = chat.id)
     }
 
+    fun deleteChat(chatId: String) {
+        sessions.removeAll { it.id == chatId }
+        if (sessions.isEmpty()) {
+            sessions += ChatSession(
+                newId(),
+                "New chat",
+                listOf(ChatMessage("Hi! I’m Askly. What would you like to know?", false))
+            )
+        }
+        persistSessions()
+        val active = sessions.first()
+        _uiState.value = ChatUiState(messages = active.messages, chats = sessions, activeChatId = active.id)
+    }
+
     private fun updateActiveMessages(messages: List<ChatMessage>) {
         val index = sessions.indexOfFirst { it.id == _uiState.value.activeChatId }
         if (index < 0) return
@@ -297,7 +312,8 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                     arabic = arabic,
                     onBack = { showHistory = false },
                     onNewChat = { chatViewModel.createNewChat(); showHistory = false },
-                    onChatSelected = { chatViewModel.openChat(it); showHistory = false }
+                    onChatSelected = { chatViewModel.openChat(it); showHistory = false },
+                    onDeleteChat = { chatViewModel.deleteChat(it) }
                 )
             } else {
                 ChatScreen(
@@ -430,7 +446,8 @@ private fun ChatHistoryScreen(
     arabic: Boolean,
     onBack: () -> Unit,
     onNewChat: () -> Unit,
-    onChatSelected: (String) -> Unit
+    onChatSelected: (String) -> Unit,
+    onDeleteChat: (String) -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -480,7 +497,14 @@ private fun ChatHistoryScreen(
                     ) {
                         Icon(Icons.Default.History, contentDescription = null)
                         Spacer(Modifier.width(12.dp))
-                        Text(chat.title, maxLines = 1)
+                        Text(chat.title, maxLines = 1, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { onDeleteChat(chat.id) }) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = if (arabic) "حذف المحادثة" else "Delete chat",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             }
