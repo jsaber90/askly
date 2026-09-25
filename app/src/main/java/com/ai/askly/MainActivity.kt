@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -310,6 +311,7 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
     var arabic by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showHistory by rememberSaveable { mutableStateOf(false) }
+    var historyRefreshKey by rememberSaveable { mutableStateOf(0) }
 
     DevAITheme(darkTheme = darkMode) {
         CompositionLocalProvider(
@@ -324,14 +326,16 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                     onArabicChanged = { arabic = it }
                 )
             } else if (showHistory) {
-                ChatHistoryScreen(
-                    chats = uiState.chats,
-                    arabic = arabic,
-                    onBack = { showHistory = false },
-                    onNewChat = { chatViewModel.createNewChat(); showHistory = false },
-                    onChatSelected = { chatViewModel.openChat(it); showHistory = false },
-                    onDeleteChat = { chatViewModel.deleteChat(it) }
-                )
+                key(historyRefreshKey) {
+                    ChatHistoryScreen(
+                        chats = uiState.chats,
+                        arabic = arabic,
+                        onBack = { showHistory = false },
+                        onNewChat = { chatViewModel.createNewChat(); showHistory = false },
+                        onChatSelected = { chatViewModel.openChat(it); showHistory = false },
+                        onDeleteChat = { chatViewModel.deleteChat(it); historyRefreshKey++ }
+                    )
+                }
             } else {
                 ChatScreen(
                     chatViewModel = chatViewModel,
