@@ -9,6 +9,8 @@ A minimal private Android AI chat app built with Kotlin and Jetpack Compose.
 - ViewModel and StateFlow UI state
 - Blue Askly launcher logo
 - Local chat history with new, open, and delete chat actions
+- Room database for structured local chat storage
+- Automatic one-time import from the previous JSON chat storage
 - Dark mode and light mode settings
 - English and Arabic language support with RTL layout
 - Settings saved locally on the device
@@ -32,4 +34,8 @@ This project is intended for private testing. Do not distribute the APK with thi
 - Use the trash icon to delete a chat.
 - Open Settings to change theme and language.
 - Android system Back returns from Settings or Chat History to the previous screen.
+
+## Local storage
+
+Chat conversations are stored in the local Room database file `askly.db`. Existing chats from older Askly builds are imported automatically on the first launch after the Room migration. Theme and language preferences remain in local app settings.
 
