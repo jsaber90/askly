@@ -2,7 +2,10 @@ package com.ai.askly
 
 import android.os.Bundle
 import android.app.Application
+import android.content.Context
+import android.content.res.Configuration
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -54,10 +57,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,6 +75,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,14 +94,20 @@ data class ChatSession(
 )
 
 data class ChatUiState(
-    val messages: List<ChatMessage> = listOf(
-        ChatMessage("Hi! I’m Askly. What would you like to know?", false)
-    ),
+    val messages: List<ChatMessage> = emptyList(),
     val chats: List<ChatSession> = emptyList(),
     val activeChatId: String = "",
     val isLoading: Boolean = false,
     val error: String? = null
 )
+
+@Composable
+private fun asklyString(@StringRes id: Int, arabic: Boolean): String {
+    val context = LocalContext.current
+    val configuration = Configuration(context.resources.configuration)
+    configuration.setLocale(if (arabic) Locale("ar") else Locale.ENGLISH)
+    return context.createConfigurationContext(configuration).getString(id)
+}
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = application.getSharedPreferences("askly_chats", 0)
@@ -107,8 +119,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (sessions.isEmpty()) {
             sessions += ChatSession(
                 id = newId(),
-                title = "New chat",
-                messages = listOf(ChatMessage("Hi! I’m Askly. What would you like to know?", false))
+                title = getApplication<Application>().getString(R.string.new_chat),
+                messages = listOf(ChatMessage(getApplication<Application>().getString(R.string.welcome_message), false))
             )
             persistSessions()
         }
@@ -125,7 +137,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(messages = updatedMessages, isLoading = true, error = null)
 
         viewModelScope.launch {
-            runCatching { OpenAiClient.ask(cleanText) }
+            runCatching { OpenAiClient.ask(cleanText, getApplication()) }
                 .onSuccess { answer ->
                     val finalMessages = updatedMessages + ChatMessage(answer, false)
                     updateActiveMessages(finalMessages)
@@ -135,7 +147,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.value = _uiState.value.copy(
                         messages = updatedMessages,
                         isLoading = false,
-                        error = error.message ?: "Something went wrong."
+                        error = error.message ?: getApplication<Application>().getString(R.string.something_wrong)
                     )
                 }
         }
@@ -154,7 +166,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        val chat = ChatSession(newId(), "New chat", listOf(ChatMessage("Hi! I’m Askly. What would you like to know?", false)))
+        val chat = ChatSession(
+            newId(),
+            getApplication<Application>().getString(R.string.new_chat),
+            listOf(ChatMessage(getApplication<Application>().getString(R.string.welcome_message), false))
+        )
         sessions.add(0, chat)
         persistSessions()
         _uiState.value = ChatUiState(messages = chat.messages, chats = sessions, activeChatId = chat.id)
@@ -170,8 +186,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (sessions.isEmpty()) {
             sessions += ChatSession(
                 newId(),
-                "New chat",
-                listOf(ChatMessage("Hi! I’m Askly. What would you like to know?", false))
+                getApplication<Application>().getString(R.string.new_chat),
+                listOf(ChatMessage(getApplication<Application>().getString(R.string.welcome_message), false))
             )
         }
         persistSessions()
@@ -183,7 +199,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val index = sessions.indexOfFirst { it.id == _uiState.value.activeChatId }
         if (index < 0) return
         val old = sessions[index]
-        val title = if (old.title == "New chat" && messages.any { it.fromUser }) {
+        val title = if (old.title == getApplication<Application>().getString(R.string.new_chat) && messages.any { it.fromUser }) {
             messages.first { it.fromUser }.text.take(32)
         } else old.title
         sessions[index] = old.copy(title = title, messages = messages)
@@ -233,11 +249,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 private object OpenAiClient {
     private const val endpoint = "https://api.openai.com/v1/responses"
 
-    suspend fun ask(prompt: String): String = withContext(Dispatchers.IO) {
+    suspend fun ask(prompt: String, context: Context): String = withContext(Dispatchers.IO) {
         // The key is supplied locally through local.properties for this private prototype.
         val key = BuildConfig.OPENAI_API_KEY
         require(key.isNotBlank()) {
-            "Add OPENAI_API_KEY=your_key_here to local.properties, then rebuild the app."
+            context.getString(R.string.api_key_missing)
         }
 
         // Responses API accepts a simple text input for a single-turn chat.
@@ -353,29 +369,26 @@ private fun ChatScreen(
                 title = {
                     Column {
                         Text("Askly", fontWeight = FontWeight.Bold)
-                        Text(
-                            if (arabic) "محادثة ذكية بسيطة" else "Simple AI chat",
-                            style = MaterialTheme.typography.labelSmall
-                        )
+                        Text(asklyString(R.string.simple_ai_chat, arabic), style = MaterialTheme.typography.labelSmall)
                     }
                 },
                 actions = {
                     IconButton(onClick = onOpenHistory) {
                         Icon(
                             Icons.Default.History,
-                            contentDescription = if (arabic) "المحادثات" else "Chat history"
+                            contentDescription = asklyString(R.string.chat_history, arabic)
                         )
                     }
                     IconButton(onClick = onNewChat) {
                         Icon(
                             Icons.Default.Add,
-                            contentDescription = if (arabic) "محادثة جديدة" else "New chat"
+                            contentDescription = asklyString(R.string.new_chat, arabic)
                         )
                     }
                     IconButton(onClick = onOpenSettings) {
                         Icon(
                             Icons.Default.Settings,
-                            contentDescription = if (arabic) "الإعدادات" else "Settings"
+                            contentDescription = asklyString(R.string.settings, arabic)
                         )
                     }
                 }
@@ -418,7 +431,7 @@ private fun ChatScreen(
                     value = input,
                     onValueChange = { input = it; chatViewModel.clearError() },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text(if (arabic) "اسأل أي شيء…" else "Ask anything…") },
+                    placeholder = { Text(asklyString(R.string.ask_anything, arabic)) },
                     maxLines = 4,
                     shape = RoundedCornerShape(22.dp)
                 )
@@ -430,7 +443,7 @@ private fun ChatScreen(
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
-                        contentDescription = if (arabic) "إرسال" else "Send",
+                        contentDescription = asklyString(R.string.send, arabic),
                         tint = Color.White
                     )
                 }
@@ -449,6 +462,7 @@ private fun ChatHistoryScreen(
     onChatSelected: (String) -> Unit,
     onDeleteChat: (String) -> Unit
 ) {
+    BackHandler(onBack = onBack)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -456,16 +470,16 @@ private fun ChatHistoryScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (arabic) "رجوع" else "Back"
+                            contentDescription = asklyString(R.string.back, arabic)
                         )
                     }
                 },
-                title = { Text(if (arabic) "المحادثات" else "Chat history") },
+                title = { Text(asklyString(R.string.chat_history, arabic)) },
                 actions = {
                     IconButton(onClick = onNewChat) {
                         Icon(
                             Icons.Default.Add,
-                            contentDescription = if (arabic) "محادثة جديدة" else "New chat"
+                            contentDescription = asklyString(R.string.new_chat, arabic)
                         )
                     }
                 }
@@ -477,7 +491,7 @@ private fun ChatHistoryScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text(if (arabic) "لا توجد محادثات بعد" else "No chats yet")
+                Text(asklyString(R.string.no_chats, arabic))
             }
         } else {
             LazyColumn(
@@ -501,7 +515,7 @@ private fun ChatHistoryScreen(
                         IconButton(onClick = { onDeleteChat(chat.id) }) {
                             Icon(
                                 Icons.Default.Delete,
-                                contentDescription = if (arabic) "حذف المحادثة" else "Delete chat",
+                                contentDescription = asklyString(R.string.delete_chat, arabic),
                                 tint = MaterialTheme.colorScheme.error
                             )
                         }
@@ -521,6 +535,7 @@ private fun SettingsScreen(
     onDarkModeChanged: (Boolean) -> Unit,
     onArabicChanged: (Boolean) -> Unit
 ) {
+    BackHandler(onBack = onBack)
     Scaffold(
         topBar = {
             TopAppBar(
@@ -528,11 +543,11 @@ private fun SettingsScreen(
                     IconButton(onClick = onBack) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = if (arabic) "رجوع" else "Back"
+                            contentDescription = asklyString(R.string.back, arabic)
                         )
                     }
                 },
-                title = { Text(if (arabic) "الإعدادات" else "Settings") }
+                title = { Text(asklyString(R.string.settings, arabic)) }
             )
         }
     ) { padding ->
@@ -544,7 +559,7 @@ private fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Text(
-                text = if (arabic) "المظهر" else "Appearance",
+                text = asklyString(R.string.appearance, arabic),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -556,13 +571,13 @@ private fun SettingsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.DarkMode, contentDescription = null)
                     Spacer(Modifier.width(12.dp))
-                    Text(if (arabic) "الوضع الداكن" else "Dark mode")
+                    Text(asklyString(R.string.dark_mode, arabic))
                 }
                 Switch(checked = darkMode, onCheckedChange = onDarkModeChanged)
             }
 
             Text(
-                text = if (arabic) "اللغة" else "Language",
+                text = asklyString(R.string.language, arabic),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -571,12 +586,12 @@ private fun SettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(if (arabic) "العربية" else "Arabic")
+                Text(asklyString(R.string.arabic, arabic))
                 Switch(checked = arabic, onCheckedChange = onArabicChanged)
             }
 
             Text(
-                text = if (arabic) "يمكنك التبديل بين العربية والإنجليزية." else "Switch between Arabic and English.",
+                text = asklyString(R.string.language_hint, arabic),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
