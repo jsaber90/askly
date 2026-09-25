@@ -305,6 +305,7 @@ private object OpenAiClient {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
+    val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
     var darkMode by rememberSaveable { mutableStateOf(false) }
     var arabic by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -324,7 +325,7 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                 )
             } else if (showHistory) {
                 ChatHistoryScreen(
-                    chats = chatViewModel.uiState.collectAsStateWithLifecycle().value.chats,
+                    chats = uiState.chats,
                     arabic = arabic,
                     onBack = { showHistory = false },
                     onNewChat = { chatViewModel.createNewChat(); showHistory = false },
