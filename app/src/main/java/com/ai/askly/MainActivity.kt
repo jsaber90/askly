@@ -1,0 +1,263 @@
+package com.ai.askly
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ai.askly.ui.theme.DevAITheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent { DevAITheme { AsklyApp() } }
+    }
+}
+
+data class ChatMessage(val text: String, val fromUser: Boolean)
+
+data class ChatUiState(
+    val messages: List<ChatMessage> = listOf(
+        ChatMessage("Hi! I’m Askly. What would you like to know?", false)
+    ),
+    val isLoading: Boolean = false,
+    val error: String? = null
+)
+
+class ChatViewModel : ViewModel() {
+    private val _uiState = MutableStateFlow(ChatUiState())
+    val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    fun sendMessage(text: String) {
+        val cleanText = text.trim()
+        if (cleanText.isEmpty() || _uiState.value.isLoading) return
+
+        val updatedMessages = _uiState.value.messages + ChatMessage(cleanText, true)
+        _uiState.value = ChatUiState(messages = updatedMessages, isLoading = true)
+
+        viewModelScope.launch {
+            runCatching { OpenAiClient.ask(cleanText) }
+                .onSuccess { answer ->
+                    _uiState.value = ChatUiState(
+                        messages = updatedMessages + ChatMessage(answer, false)
+                    )
+                }
+                .onFailure { error ->
+                    _uiState.value = ChatUiState(
+                        messages = updatedMessages,
+                        error = error.message ?: "Something went wrong."
+                    )
+                }
+        }
+    }
+
+    fun clearError() {
+        _uiState.value = _uiState.value.copy(error = null)
+    }
+}
+
+private object OpenAiClient {
+    private const val endpoint = "https://api.openai.com/v1/responses"
+
+    suspend fun ask(prompt: String): String = withContext(Dispatchers.IO) {
+        // The key is supplied locally through local.properties for this private prototype.
+        val key = BuildConfig.OPENAI_API_KEY
+        require(key.isNotBlank()) {
+            "Add OPENAI_API_KEY=your_key_here to local.properties, then rebuild the app."
+        }
+
+        // Responses API accepts a simple text input for a single-turn chat.
+        val body = org.json.JSONObject()
+            .put("model", "gpt-5")
+            .put("input", prompt)
+            .toString()
+
+        val connection = (java.net.URL(endpoint).openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            setRequestProperty("Authorization", "Bearer $key")
+            setRequestProperty("Content-Type", "application/json")
+        }
+
+        connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        val responseStream = if (connection.responseCode in 200..299) {
+            connection.inputStream
+        } else {
+            connection.errorStream ?: throw IllegalStateException("OpenAI returned no error details.")
+        }
+        val responseText = responseStream.bufferedReader().use { it.readText() }
+
+        if (connection.responseCode !in 200..299) {
+            throw IllegalStateException("OpenAI error ${connection.responseCode}: $responseText")
+        }
+
+        extractOutputText(org.json.JSONObject(responseText))
+    }
+
+    private fun extractOutputText(response: org.json.JSONObject): String {
+        val output = response.optJSONArray("output")
+            ?: throw IllegalStateException("The API returned no output.")
+
+        for (i in 0 until output.length()) {
+            val item = output.optJSONObject(i) ?: continue
+            val content = item.optJSONArray("content") ?: continue
+            for (j in 0 until content.length()) {
+                val text = content.optJSONObject(j)?.optString("text").orEmpty()
+                if (text.isNotBlank()) return text
+            }
+        }
+        throw IllegalStateException("The API returned an empty answer.")
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
+    val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
+    var input by rememberSaveable { mutableStateOf("") }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(uiState.messages.size, uiState.isLoading) {
+        if (uiState.messages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.messages.lastIndex)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Askly", fontWeight = FontWeight.Bold)
+                        Text("Simple AI chat", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .imePadding()
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(uiState.messages) { message -> MessageBubble(message) }
+                if (uiState.isLoading) {
+                    item { CircularProgressIndicator(modifier = Modifier.size(24.dp)) }
+                }
+            }
+
+            uiState.error?.let { error ->
+                Text(
+                    text = error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(6.dp))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it; chatViewModel.clearError() },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Ask anything…") },
+                    maxLines = 4,
+                    shape = RoundedCornerShape(22.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = { chatViewModel.sendMessage(input); input = "" },
+                    enabled = input.isNotBlank() && !uiState.isLoading,
+                    modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageBubble(message: ChatMessage) {
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = if (message.fromUser) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Text(
+            text = message.text,
+            modifier = Modifier
+                .clip(RoundedCornerShape(18.dp))
+                .background(
+                    if (message.fromUser) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surfaceVariant
+                )
+                .padding(horizontal = 16.dp, vertical = 11.dp),
+            color = if (message.fromUser) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}

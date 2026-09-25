@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Askly speech bubble -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M24,28C24,20.3 30.3,14 38,14H70C77.7,14 84,20.3 84,28V64C84,71.7 77.7,78 70,78H38C30.3,78 24,71.7 24,64V28Z" />
+    <!-- Stylized A from Askly -->
+    <path
+        android:fillColor="#2563EB"
+        android:pathData="M54,29L35,65H44L47.5,57H60.5L64,65H73L55,29H54ZM51,50L54,40L57,50H51Z" />
+</vector>

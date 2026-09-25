@@ -1,0 +1,2 @@
+# Copy this value into local.properties and replace it with your OpenAI API key.
+OPENAI_API_KEY=your_key_here
