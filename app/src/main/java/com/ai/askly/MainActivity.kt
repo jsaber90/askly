@@ -141,6 +141,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun createNewChat() {
+        val emptyChat = sessions.firstOrNull { session ->
+            session.messages.none { it.fromUser }
+        }
+        if (emptyChat != null) {
+            _uiState.value = ChatUiState(
+                messages = emptyChat.messages,
+                chats = sessions,
+                activeChatId = emptyChat.id
+            )
+            return
+        }
+
         val chat = ChatSession(newId(), "New chat", listOf(ChatMessage("Hi! I’m Askly. What would you like to know?", false)))
         sessions.add(0, chat)
         persistSessions()
