@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -307,8 +308,10 @@ private object OpenAiClient {
 @Composable
 private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
-    var darkMode by rememberSaveable { mutableStateOf(false) }
-    var arabic by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val settings = remember { context.getSharedPreferences("askly_settings", 0) }
+    var darkMode by rememberSaveable { mutableStateOf(settings.getBoolean("dark_mode", false)) }
+    var arabic by rememberSaveable { mutableStateOf(settings.getBoolean("arabic", false)) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showHistory by rememberSaveable { mutableStateOf(false) }
     var historyRefreshKey by rememberSaveable { mutableStateOf(0) }
@@ -322,8 +325,14 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                     arabic = arabic,
                     darkMode = darkMode,
                     onBack = { showSettings = false },
-                    onDarkModeChanged = { darkMode = it },
-                    onArabicChanged = { arabic = it }
+                    onDarkModeChanged = {
+                        darkMode = it
+                        settings.edit().putBoolean("dark_mode", it).apply()
+                    },
+                    onArabicChanged = {
+                        arabic = it
+                        settings.edit().putBoolean("arabic", it).apply()
+                    }
                 )
             } else if (showHistory) {
                 key(historyRefreshKey) {
