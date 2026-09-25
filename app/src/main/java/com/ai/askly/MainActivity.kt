@@ -1,10 +1,12 @@
 package com.ai.askly
 
 import android.os.Bundle
+import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -54,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -75,39 +80,122 @@ class MainActivity : ComponentActivity() {
 
 data class ChatMessage(val text: String, val fromUser: Boolean)
 
+data class ChatSession(
+    val id: String,
+    val title: String,
+    val messages: List<ChatMessage>
+)
+
 data class ChatUiState(
     val messages: List<ChatMessage> = listOf(
         ChatMessage("Hi! I’m Askly. What would you like to know?", false)
     ),
+    val chats: List<ChatSession> = emptyList(),
+    val activeChatId: String = "",
     val isLoading: Boolean = false,
     val error: String? = null
 )
 
-class ChatViewModel : ViewModel() {
-    private val _uiState = MutableStateFlow(ChatUiState())
+class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    private val preferences = application.getSharedPreferences("askly_chats", 0)
+    private var sessions = loadSessions().toMutableList()
+    private val _uiState = MutableStateFlow(initialState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    private fun initialState(): ChatUiState {
+        if (sessions.isEmpty()) {
+            sessions += ChatSession(
+                id = newId(),
+                title = "New chat",
+                messages = listOf(ChatMessage("Hi! I’m Askly. What would you like to know?", false))
+            )
+            persistSessions()
+        }
+        val active = sessions.first()
+        return ChatUiState(messages = active.messages, chats = sessions, activeChatId = active.id)
+    }
 
     fun sendMessage(text: String) {
         val cleanText = text.trim()
         if (cleanText.isEmpty() || _uiState.value.isLoading) return
 
         val updatedMessages = _uiState.value.messages + ChatMessage(cleanText, true)
-        _uiState.value = ChatUiState(messages = updatedMessages, isLoading = true)
+        updateActiveMessages(updatedMessages)
+        _uiState.value = _uiState.value.copy(messages = updatedMessages, isLoading = true, error = null)
 
         viewModelScope.launch {
             runCatching { OpenAiClient.ask(cleanText) }
                 .onSuccess { answer ->
-                    _uiState.value = ChatUiState(
-                        messages = updatedMessages + ChatMessage(answer, false)
-                    )
+                    val finalMessages = updatedMessages + ChatMessage(answer, false)
+                    updateActiveMessages(finalMessages)
+                    _uiState.value = _uiState.value.copy(messages = finalMessages, isLoading = false)
                 }
                 .onFailure { error ->
-                    _uiState.value = ChatUiState(
+                    _uiState.value = _uiState.value.copy(
                         messages = updatedMessages,
+                        isLoading = false,
                         error = error.message ?: "Something went wrong."
                     )
                 }
         }
+    }
+
+    fun createNewChat() {
+        val chat = ChatSession(newId(), "New chat", listOf(ChatMessage("Hi! I’m Askly. What would you like to know?", false)))
+        sessions.add(0, chat)
+        persistSessions()
+        _uiState.value = ChatUiState(messages = chat.messages, chats = sessions, activeChatId = chat.id)
+    }
+
+    fun openChat(chatId: String) {
+        val chat = sessions.firstOrNull { it.id == chatId } ?: return
+        _uiState.value = ChatUiState(messages = chat.messages, chats = sessions, activeChatId = chat.id)
+    }
+
+    private fun updateActiveMessages(messages: List<ChatMessage>) {
+        val index = sessions.indexOfFirst { it.id == _uiState.value.activeChatId }
+        if (index < 0) return
+        val old = sessions[index]
+        val title = if (old.title == "New chat" && messages.any { it.fromUser }) {
+            messages.first { it.fromUser }.text.take(32)
+        } else old.title
+        sessions[index] = old.copy(title = title, messages = messages)
+        persistSessions()
+        _uiState.value = _uiState.value.copy(chats = sessions)
+    }
+
+    private fun newId() = System.currentTimeMillis().toString()
+
+    private fun persistSessions() {
+        val array = org.json.JSONArray()
+        sessions.forEach { session ->
+            val messages = org.json.JSONArray()
+            session.messages.forEach { message ->
+                messages.put(org.json.JSONObject().put("text", message.text).put("fromUser", message.fromUser))
+            }
+            array.put(org.json.JSONObject().put("id", session.id).put("title", session.title).put("messages", messages))
+        }
+        preferences.edit().putString("sessions", array.toString()).apply()
+    }
+
+    private fun loadSessions(): List<ChatSession> {
+        val raw = preferences.getString("sessions", null) ?: return emptyList()
+        return runCatching {
+            val array = org.json.JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val session = array.getJSONObject(i)
+                    val messagesJson = session.getJSONArray("messages")
+                    val messages = buildList {
+                        for (j in 0 until messagesJson.length()) {
+                            val message = messagesJson.getJSONObject(j)
+                            add(ChatMessage(message.getString("text"), message.getBoolean("fromUser")))
+                        }
+                    }
+                    add(ChatSession(session.getString("id"), session.getString("title"), messages))
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     fun clearError() {
@@ -177,6 +265,7 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
     var darkMode by rememberSaveable { mutableStateOf(false) }
     var arabic by rememberSaveable { mutableStateOf(false) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showHistory by rememberSaveable { mutableStateOf(false) }
 
     DevAITheme(darkTheme = darkMode) {
         CompositionLocalProvider(
@@ -190,11 +279,21 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                     onDarkModeChanged = { darkMode = it },
                     onArabicChanged = { arabic = it }
                 )
+            } else if (showHistory) {
+                ChatHistoryScreen(
+                    chats = chatViewModel.uiState.collectAsStateWithLifecycle().value.chats,
+                    arabic = arabic,
+                    onBack = { showHistory = false },
+                    onNewChat = { chatViewModel.createNewChat(); showHistory = false },
+                    onChatSelected = { chatViewModel.openChat(it); showHistory = false }
+                )
             } else {
                 ChatScreen(
                     chatViewModel = chatViewModel,
                     arabic = arabic,
-                    onOpenSettings = { showSettings = true }
+                    onOpenSettings = { showSettings = true },
+                    onOpenHistory = { showHistory = true },
+                    onNewChat = { chatViewModel.createNewChat() }
                 )
             }
         }
@@ -206,7 +305,9 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
 private fun ChatScreen(
     chatViewModel: ChatViewModel,
     arabic: Boolean,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onNewChat: () -> Unit
 ) {
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
@@ -231,6 +332,18 @@ private fun ChatScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenHistory) {
+                        Icon(
+                            Icons.Default.History,
+                            contentDescription = if (arabic) "المحادثات" else "Chat history"
+                        )
+                    }
+                    IconButton(onClick = onNewChat) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = if (arabic) "محادثة جديدة" else "New chat"
+                        )
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(
                             Icons.Default.Settings,
@@ -292,6 +405,71 @@ private fun ChatScreen(
                         contentDescription = if (arabic) "إرسال" else "Send",
                         tint = Color.White
                     )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatHistoryScreen(
+    chats: List<ChatSession>,
+    arabic: Boolean,
+    onBack: () -> Unit,
+    onNewChat: () -> Unit,
+    onChatSelected: (String) -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = if (arabic) "رجوع" else "Back"
+                        )
+                    }
+                },
+                title = { Text(if (arabic) "المحادثات" else "Chat history") },
+                actions = {
+                    IconButton(onClick = onNewChat) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = if (arabic) "محادثة جديدة" else "New chat"
+                        )
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        if (chats.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(if (arabic) "لا توجد محادثات بعد" else "No chats yet")
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(chats, key = { it.id }) { chat ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onChatSelected(chat.id) }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.History, contentDescription = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text(chat.title, maxLines = 1)
+                    }
                 }
             }
         }
