@@ -24,7 +24,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -32,9 +35,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,7 +49,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,7 +69,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { DevAITheme { AsklyApp() } }
+        setContent { AsklyApp() }
     }
 }
 
@@ -167,6 +174,40 @@ private object OpenAiClient {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
+    var darkMode by rememberSaveable { mutableStateOf(false) }
+    var arabic by rememberSaveable { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+
+    DevAITheme(darkTheme = darkMode) {
+        CompositionLocalProvider(
+            LocalLayoutDirection provides if (arabic) LayoutDirection.Rtl else LayoutDirection.Ltr
+        ) {
+            if (showSettings) {
+                SettingsScreen(
+                    arabic = arabic,
+                    darkMode = darkMode,
+                    onBack = { showSettings = false },
+                    onDarkModeChanged = { darkMode = it },
+                    onArabicChanged = { arabic = it }
+                )
+            } else {
+                ChatScreen(
+                    chatViewModel = chatViewModel,
+                    arabic = arabic,
+                    onOpenSettings = { showSettings = true }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatScreen(
+    chatViewModel: ChatViewModel,
+    arabic: Boolean,
+    onOpenSettings: () -> Unit
+) {
     val uiState by chatViewModel.uiState.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -183,7 +224,18 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                 title = {
                     Column {
                         Text("Askly", fontWeight = FontWeight.Bold)
-                        Text("Simple AI chat", style = MaterialTheme.typography.labelSmall)
+                        Text(
+                            if (arabic) "محادثة ذكية بسيطة" else "Simple AI chat",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = if (arabic) "الإعدادات" else "Settings"
+                        )
                     }
                 }
             )
@@ -225,7 +277,7 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                     value = input,
                     onValueChange = { input = it; chatViewModel.clearError() },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Ask anything…") },
+                    placeholder = { Text(if (arabic) "اسأل أي شيء…" else "Ask anything…") },
                     maxLines = 4,
                     shape = RoundedCornerShape(22.dp)
                 )
@@ -235,9 +287,85 @@ private fun AsklyApp(chatViewModel: ChatViewModel = viewModel()) {
                     enabled = input.isNotBlank() && !uiState.isLoading,
                     modifier = Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.primary)
                 ) {
-                    Icon(Icons.Default.Send, contentDescription = "Send", tint = Color.White)
+                    Icon(
+                        Icons.Default.Send,
+                        contentDescription = if (arabic) "إرسال" else "Send",
+                        tint = Color.White
+                    )
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsScreen(
+    arabic: Boolean,
+    darkMode: Boolean,
+    onBack: () -> Unit,
+    onDarkModeChanged: (Boolean) -> Unit,
+    onArabicChanged: (Boolean) -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.Default.ArrowBack,
+                            contentDescription = if (arabic) "رجوع" else "Back"
+                        )
+                    }
+                },
+                title = { Text(if (arabic) "الإعدادات" else "Settings") }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            Text(
+                text = if (arabic) "المظهر" else "Appearance",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.DarkMode, contentDescription = null)
+                    Spacer(Modifier.width(12.dp))
+                    Text(if (arabic) "الوضع الداكن" else "Dark mode")
+                }
+                Switch(checked = darkMode, onCheckedChange = onDarkModeChanged)
+            }
+
+            Text(
+                text = if (arabic) "اللغة" else "Language",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(if (arabic) "العربية" else "Arabic")
+                Switch(checked = arabic, onCheckedChange = onArabicChanged)
+            }
+
+            Text(
+                text = if (arabic) "يمكنك التبديل بين العربية والإنجليزية." else "Switch between Arabic and English.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -261,3 +389,4 @@ private fun MessageBubble(message: ChatMessage) {
         )
     }
 }
+
