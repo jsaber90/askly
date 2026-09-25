@@ -70,6 +70,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ai.askly.data.ChatDatabase
+import com.ai.askly.data.ChatEntity
 import com.ai.askly.ui.theme.DevAITheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,22 +114,28 @@ private fun asklyString(@StringRes id: Int, arabic: Boolean): String {
 }
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+    private val database = ChatDatabase.get(application)
     private val preferences = application.getSharedPreferences("askly_chats", 0)
-    private var sessions = loadSessions().toMutableList()
-    private val _uiState = MutableStateFlow(initialState())
+    private var sessions = mutableListOf<ChatSession>()
+    private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    private fun initialState(): ChatUiState {
-        if (sessions.isEmpty()) {
-            sessions += ChatSession(
-                id = newId(),
-                title = getApplication<Application>().getString(R.string.new_chat),
-                messages = listOf(ChatMessage(getApplication<Application>().getString(R.string.welcome_message), false))
-            )
-            persistSessions()
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            val storedChats = database.chatDao().getAll()
+            sessions = if (storedChats.isNotEmpty()) {
+                storedChats.map(::toSession).toMutableList()
+            } else {
+                loadLegacySessions().toMutableList().ifEmpty {
+                    mutableListOf(newEmptyChat())
+                }.also {
+                    database.chatDao().insertAll(it.mapIndexed(::toEntity))
+                    preferences.edit().remove("sessions").apply()
+                }
+            }
+            val active = sessions.first()
+            _uiState.value = ChatUiState(messages = active.messages, chats = sessions.toList(), activeChatId = active.id)
         }
-        val active = sessions.first()
-        return ChatUiState(messages = active.messages, chats = sessions, activeChatId = active.id)
     }
 
     fun sendMessage(text: String) {
@@ -192,6 +200,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 listOf(ChatMessage(getApplication<Application>().getString(R.string.welcome_message), false))
             )
         }
+        viewModelScope.launch(Dispatchers.IO) { database.chatDao().deleteById(chatId) }
         persistSessions()
         val active = sessions.first()
         _uiState.value = ChatUiState(messages = active.messages, chats = sessions, activeChatId = active.id)
@@ -211,6 +220,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun newId() = System.currentTimeMillis().toString()
 
+    private fun newEmptyChat() = ChatSession(
+        newId(),
+        getApplication<Application>().getString(R.string.new_chat),
+        listOf(ChatMessage(getApplication<Application>().getString(R.string.welcome_message), false))
+    )
+
     private fun persistSessions() {
         val array = org.json.JSONArray()
         sessions.forEach { session ->
@@ -220,10 +235,41 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             array.put(org.json.JSONObject().put("id", session.id).put("title", session.title).put("messages", messages))
         }
-        preferences.edit().putString("sessions", array.toString()).apply()
+        viewModelScope.launch(Dispatchers.IO) {
+            database.chatDao().insertAll(sessions.mapIndexed(::toEntity))
+        }
     }
 
-    private fun loadSessions(): List<ChatSession> {
+    private fun toEntity(position: Int, session: ChatSession) = ChatEntity(
+        id = session.id,
+        title = session.title,
+        messagesJson = encodeMessages(session.messages),
+        position = position
+    )
+
+    private fun toSession(entity: ChatEntity): ChatSession = ChatSession(
+        id = entity.id,
+        title = entity.title,
+        messages = decodeMessages(entity.messagesJson)
+    )
+
+    private fun encodeMessages(messages: List<ChatMessage>): String {
+        val array = org.json.JSONArray()
+        messages.forEach { array.put(org.json.JSONObject().put("text", it.text).put("fromUser", it.fromUser)) }
+        return array.toString()
+    }
+
+    private fun decodeMessages(raw: String): List<ChatMessage> {
+        val array = org.json.JSONArray(raw)
+        return buildList {
+            for (i in 0 until array.length()) {
+                val message = array.getJSONObject(i)
+                add(ChatMessage(message.getString("text"), message.getBoolean("fromUser")))
+            }
+        }
+    }
+
+    private fun loadLegacySessions(): List<ChatSession> {
         val raw = preferences.getString("sessions", null) ?: return emptyList()
         return runCatching {
             val array = org.json.JSONArray(raw)
