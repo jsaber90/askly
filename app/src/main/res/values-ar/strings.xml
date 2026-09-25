@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">أسكلي</string>
+    <string name="simple_ai_chat">محادثة ذكية بسيطة</string>
+    <string name="settings">الإعدادات</string>
+    <string name="chat_history">المحادثات</string>
+    <string name="new_chat">محادثة جديدة</string>
+    <string name="back">رجوع</string>
+    <string name="delete_chat">حذف المحادثة</string>
+    <string name="appearance">المظهر</string>
+    <string name="dark_mode">الوضع الداكن</string>
+    <string name="language">اللغة</string>
+    <string name="arabic">العربية</string>
+    <string name="language_hint">التبديل بين العربية والإنجليزية.</string>
+    <string name="no_chats">لا توجد محادثات بعد</string>
+    <string name="ask_anything">اسأل أي شيء…</string>
+    <string name="send">إرسال</string>
+    <string name="welcome_message">مرحباً! أنا أسكلي. ماذا تريد أن تعرف؟</string>
+    <string name="api_key_missing">أضف OPENAI_API_KEY=your_key_here إلى local.properties ثم أعد بناء التطبيق.</string>
+    <string name="something_wrong">حدث خطأ ما.</string>
+</resources>
+
